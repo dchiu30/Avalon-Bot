@@ -1,0 +1,32 @@
+{
+    "5":{
+        "Good": 3,
+        "Evil": 2,
+        "MissionTeamMembers": [2,3,2,3,3]
+    },
+    "6":{
+        "Good": 4,
+        "Evil": 2,
+        "MissionTeamMembers": [2,3,4,3,4]
+    },
+    "7":{
+        "Good": 4,
+        "Evil": 3,
+        "MissionTeamMembers": [2,3,3,4,4]
+    },
+    "8":{
+        "Good": 5,
+        "Evil": 3,
+        "MissionTeamMembers": [3,4,4,5,5]
+    },
+    "9":{
+        "Good": 6,
+        "Evil": 3,
+        "MissionTeamMembers": [3,4,4,5,5]
+    },
+    "10":{
+        "Good": 6,
+        "Evil": 4,
+        "MissionTeamMembers": [3,4,4,5,5]
+    }
+}
