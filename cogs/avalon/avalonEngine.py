@@ -56,10 +56,10 @@ class AvalonEngine:
         return random.shuffle(revealedCharacters)
 
     @staticmethod
-    def isTeamApproved(votes):
+    def isTeamApproved(voteMap):
         decision = 0
-        for vote in votes:
-            decision = (decision+1) if vote else (decision-1)
+        for vote in voteMap:
+            decision = (decision+1) if voteMap[vote] else (decision-1)
         if decision > 0:
             return True
         return False

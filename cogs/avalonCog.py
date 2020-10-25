@@ -22,11 +22,17 @@ class AvalonCog(commands.Cog):
             channel = await user.create_dm()
         await channel.send(message)
 
-    def genUserToNameMap(self, users):
-        userToNameMap = {}
+    def genPlayerMap(self,players):
+        playerMap = {}
+        for player in players:
+            playerMap[player.user.name]= player
+        return playerMap
+
+    def genNameToUserMap(self, users):
+        nameToUserMap = {}
         for user in users:
-            userToNameMap[user.name] = user
-        return userToNameMap
+            nameToUserMap[user.name] = user
+        return nameToUserMap
 
     #Creates a new lobby with either a randomly generated token or one passed by the lobby creator
     @commands.command(pass_context = True)
@@ -152,16 +158,43 @@ class AvalonCog(commands.Cog):
         playerCount = len(lobby['players'])
         gameFormat = AvalonEngine.fetchGameSetup(playerCount)
         characters = AvalonEngine.genCharacterList(gameFormat['good'],gameFormat['evil'],lobby['specialCharacters'])
+        questSizes = gameFormat['MissionTeamMembers']
         players = AvalonEngine.assignCharacters(lobby['players'],characters)
+        playerMap = self.genPlayerMap(players)
         characterMap = AvalonEngine.genCharacterMap(players)
-        userToNamerMap = self.genUserToNameMap(lobby['players'])
         leader = 0
+        succesfulMissions = 0
+        failedMissions = 0
+        missionsLog = ['-','-','-','-','-']
         #Game now actually starts
         self.sendRoles(lobbyToken, players)
         self.reveal(lobbyToken, players, characterMap)
         for mission in range(5):
-            attempt = 0
-
+            ctx.channel.send("Lobby {} Quest Team Sizes: Q1:{} Q2:{} Q3:{} Q4:{} Q5:{}".format(lobbyToken, questSizes[0],questSizes[1],questSizes[2],questSizes[3],questSizes[4]))
+            ctx.channel.send("Lobby {} Quest Results: Q1:{} Q2:{} Q3:{} Q4:{} Q5:{}".format(lobbyToken, missionsLog[0],missionsLog[1],missionsLog[2],missionsLog[3],missionsLog[4]))
+            attempt = 1
+            team = []
+            while(not(bool(team))and attempt <= 5):
+                team = self.proposeTeam(ctx,players,playerMap,leader,lobbyToken,questSizes[mission],mission+1,attempt)
+                attempt += 1
+            if (team):
+                result = self.runMission(ctx,lobby, team,mission,playerMap)
+            else:
+                if (not(bool(team))and (attempt == 6)):
+                    result = False
+            if result:
+                succesfulMissions += 1
+                missionsLog[mission] = 'O'
+            else:
+                failedMissions += 1
+                missionsLog[mission] = 'X'
+            if(failedMissions == 2 or succesfulMissions == 3):
+                break
+        if (succesfulMissions == 3 and self.attemptAssassination(ctx,lobbyToken,playerMap,characterMap)):
+            ctx.channel.send("Lobby {}: Good Team Wins! Congratulations Good Guys!")
+        else:
+            ctx.channel.send("Lobby {}: Bad Team Wins! Congratulations Bad Guys!")
+        
     #Sends a message to all given players about what role they received
     def sendRoles(self, token, players):
         for player in players:
@@ -177,7 +210,7 @@ class AvalonCog(commands.Cog):
             await self.sendDM(player,"Lobby {}: The following people have been revelaed to you: {}".format(token, playerNames))
 
     #Receives a team from the leader and proposes it to everyone, returns the proposed team if approved or an empty array if not approved
-    def proposeTeam(self, ctx, players, userToNameMap, leader, token, teamSize, missionNum, attemptNum ):
+    def proposeTeam(self, ctx, players, playerMap, leader, token, teamSize, missionNum, attemptNum ):
         def check(m):
             return m.author == players[leader].user
         team = []
@@ -188,15 +221,90 @@ class AvalonCog(commands.Cog):
             proposedTeam = message.split()
             validTeam = True
             for member in proposedTeam:
-                if not(member in userToNameMap):
+                if not(member in playerMap):
                     validTeam = False
-                userToNameMap.remove(member)
+                playerMap.remove(member)
             if(validTeam  and len(proposedTeam) ==teamSize):
                 team = proposedTeam
         await ctx.channel.send("Lobby {}: {} has proposed the following team: {}".format(token,players[leader].user.name, proposedTeam))
         for player in players:
-            self.sendDM(player, "Lobby {}: Do you approve of proposed team? please type y for yes, or n for no".format(token))
+            self.sendDM(player.user, "Lobby {}: Do you approve of proposed team? please type y for yes, or n for no".format(token))
+        voteMap = {}
+        voteMessage = ''
+        while(players):
+            #iterate through all players and check if we have a response from them
+            for player in players:
+                dm_channel = player.user.dm_channel()
+                message = dm_channel.history(limit=1).flatten()[0]
+                if message.author == player.user:
+                    messageContent = message.content.lower()
+                    if messageContent == 'y':
+                        voteMap[player.user.name] = True
+                        players.remove(player)
+                        voteMessage.join("{}: Approve ".format(player.user.name))
+                    else:
+                        if messageContent == 'n':
+                            voteMap[player.user.name] == False
+                            players.remove(player)
+                            voteMessage.join("{}: Unapprove ".format(player.user.name))
+        isApproved = AvalonEngine.isTeamApproved(voteMap)
+        isApprovedMessage = "Approved" if isApproved else "Unapproved"
+        ctx.channel.send("Lobby {}:Voting has completed, team is {}, votes were as follows:".format(token,isApprovedMessage))
+        ctx.send(voteMessage)
+        if not(isApproved):
+            proposedTeam = []
         return proposedTeam
     
+    def runMission(self, ctx, token, team, missionNum, playerMap):
+        teamUserList = []
+        responses = []
+        successMessage = ''
+        for member in team:
+            if(member.character.isGood):
+                self.sendDM(member.user,"Lobby {}: You are good. When you are ready, type p to pass the mission".format(token))
+            else:
+                self.sendDM(member.user,"Lobby {}: You are bad. Please type p to pass the mission or f to fail it".format(token))
+            teamUserList.append(playerMap[member])
+        while(team):
+            for member in teamUserList:
+                dm_channel = member.user.dm_channel()
+                message = dm_channel.history(limit=1).flatten()[0]
+                if message.author == member.user:
+                    messageContent = message.content.lower()
+                    if messageContent == 'p':
+                        True
+                        team.remove(member.user.name)
+                        successMessage.join("Pass ")
+                    else:
+                        if not(member.character.isGood) and messageContent == 'f':
+                            responses.append(False)
+                            team.remove(member.user.name)
+                            successMessage.join("Fail ")
+        random.shuffle(successMessage)
+        if(missionNum == 2):
+            succeeded = AvalonEngine.doesQuestThreePass(responses)
+        else:
+            succeeded = AvalonEngine.doesQuestPass(responses)
+        if(succeeded):
+            ctx.channel.message("Lobby {}: Mission {} has passed!".format(token,missionNum+1))
+        else:
+            ctx.channel.message("Lobby {}: Mission {} has failed!".format(token,missionNum+1))
+        ctx.channel.message("These were the responses : {}".format(successMessage))
+        return succeeded
+         
+    def attemptAssassination(self, ctx, token, playerMap, characterMap):
+        assassin = characterMap["Assassin"][0]
+        target = ''
+        def check(m):
+            return m.author == assassin.user
+        ctx.send("Lobby {}: {} can now try to assassinate merlin, please enter the name of the user you want to assassinate".format(token,assassin.user.name))
+        while not(target):
+            message = self.bot.waitFor('message',check=check)
+            if (message in playerMap):
+                target = playerMap[message]
+        if (playerMap[target].character == Merlin):
+            return True
+        return False
+
 def setup(bot):
     bot.add_cog(AvalonCog(bot))
